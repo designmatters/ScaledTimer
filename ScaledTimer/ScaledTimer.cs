@@ -6,50 +6,41 @@ public delegate void ElapsedEventHandler(object sender, ElapsedEventArgs e);
 
 public class ScaledTimer
 {
-    private readonly double _interval;
+    private readonly double _intervalMs;
     private readonly double _startScale;
     private readonly bool _autoReset;
 
-    private double _accumulatedTimeMilliseconds;
     private double _currentFactor;
+    private double _accumulatedTimeMilliseconds;
+    private long? _prevTicks;
 
-    private readonly Stopwatch _stopwatch = new();
-    private long? _lastTicks;
     private static readonly double TickFrequency = 1000.0 / Stopwatch.Frequency;
 
     private CancellationTokenSource? _cts;
-    private Task? _tickTask;
+    private Task _updateTask;
+
+    public ScaledTimer(double intervalMs, double startScale, bool autoReset = false)
+    {
+        _intervalMs = intervalMs;
+        _startScale = startScale;
+        _autoReset = autoReset;
+    }
 
     public event ElapsedEventHandler? Elapsed;
 
     public bool Running { get; private set; }
 
-    public ScaledTimer(double intervalMs, double startScale, bool autoReset = false)
-    {
-        _interval = intervalMs;
-        _startScale = startScale;
-        _autoReset = autoReset;
-    }
-
     public void Start()
     {
-        _currentFactor = Math.Clamp(_startScale / 100.0, 0, 1);
+        if (Running) return;
+        SetScale(_startScale);
         _accumulatedTimeMilliseconds = 0;
-        _lastTicks = null;
-        Running = true;
-
+        _prevTicks = null;
         _cts = new CancellationTokenSource();
-        _stopwatch.Restart();
-        _tickTask = Task.Run(() => TickLoop(_cts.Token));
+        _updateTask = Task.Run(() => UpdateLoop(_cts.Token));
+        Running = true;
     }
-
-    public void Stop()
-    {
-        Running = false;
-        _cts?.Cancel();
-        _stopwatch.Stop();
-    }
-
+    
     public void SetScale(double percent)
     {
         _currentFactor = Math.Clamp(percent / 100.0, 0, 1);
@@ -61,13 +52,7 @@ public class ScaledTimer
         return TimeSpan.FromMilliseconds(_accumulatedTimeMilliseconds);
     }
 
-    public void Reset()
-    {
-        _accumulatedTimeMilliseconds = 0;
-        _lastTicks = null;
-    }
-
-    private async Task TickLoop(CancellationToken token)
+    private async Task UpdateLoop(CancellationToken token)
     {
         while (!token.IsCancellationRequested)
         {
@@ -75,19 +60,24 @@ public class ScaledTimer
             await Task.Delay(1, token);
         }
     }
+    
+    private void Stop()
+    {
+        Running = false;
+        _cts?.Cancel();
+    }
 
     private void Update()
     {
         if (!Running) return;
 
-        long nowTicks = Stopwatch.GetTimestamp();
-
-        if (_lastTicks.HasValue)
+        var nowTicks = Stopwatch.GetTimestamp();
+        if (_prevTicks.HasValue)
         {
-            double deltaMs = (nowTicks - _lastTicks.Value) * TickFrequency;
+            var deltaMs = (nowTicks - _prevTicks.Value) * TickFrequency;
             _accumulatedTimeMilliseconds += deltaMs * _currentFactor;
 
-            if (_accumulatedTimeMilliseconds >= _interval)
+            if (_accumulatedTimeMilliseconds >= _intervalMs)
             {
                 Elapsed?.Invoke(this, new ElapsedEventArgs(
                     DateTime.UtcNow,
@@ -107,6 +97,6 @@ public class ScaledTimer
             }
         }
 
-        _lastTicks = nowTicks;
+        _prevTicks = nowTicks;
     }
 }
