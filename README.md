@@ -11,6 +11,8 @@ var timer = new ScaledTimer.ScaledTimer(intervalMs: 3000, startScale: 50);
 timer.Start();
 timer.SetScale(73);
 ...
+timer.SetScale(49)
+...
 
 [Scale changed → 73%]
 → Time: 00:00:00.00
